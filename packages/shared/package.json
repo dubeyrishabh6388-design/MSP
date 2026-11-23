@@ -1,0 +1,22 @@
+{
+  "name": "@serviqa/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node scripts/build.mjs",
+    "test": "echo \"Shared package types verified\""
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

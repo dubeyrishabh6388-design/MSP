@@ -1,0 +1,674 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  CUSTOMER
+  PROVIDER
+  ADMIN
+  SUPPORT_STAFF
+}
+
+enum VerificationStatus {
+  PENDING
+  IN_REVIEW
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum ServiceWorkflowType {
+  FIXED_PRICE
+  INSPECTION_FIRST
+  CUSTOM_QUOTATION
+  RECURRING
+}
+
+enum BookingStatus {
+  DRAFT
+  REQUESTED
+  MATCHING
+  QUOTATIONS_RECEIVED
+  PROVIDER_SELECTED
+  CONFIRMED
+  PROVIDER_EN_ROUTE
+  IN_PROGRESS
+  COMPLETION_SUBMITTED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum QuotationStatus {
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  REFUNDED
+  FAILED
+}
+
+enum ComplaintStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+}
+
+enum RewardCategory {
+  SERVICE_STAR
+  CUSTOMER_FAVOURITE
+  RELIABILITY_CHAMPION
+  RISING_STAR
+  CATEGORY_CHAMPION
+  LONG_TERM_EXCELLENCE
+}
+
+enum ConsentStatus {
+  GRANTED
+  WITHDRAWN
+}
+
+model User {
+  id              String           @id @default(uuid()) @db.VarChar(36)
+  email           String           @unique @db.VarChar(191)
+  phone           String?          @unique @db.VarChar(50)
+  passwordHash    String           @db.VarChar(255)
+  name            String           @db.VarChar(100)
+  role            UserRole         @default(CUSTOMER)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  customerProfile CustomerProfile?
+  providerProfile ProviderProfile?
+  addresses       Address[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]       @relation("AdminAudit")
+  supportTickets  SupportTicket[]
+  consentRecords  ConsentRecord[]
+
+  @@index([role, isActive])
+}
+
+model CustomerProfile {
+  id              String           @id @default(uuid()) @db.VarChar(36)
+  userId          String           @unique @db.VarChar(36)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referralCode    String?          @unique @db.VarChar(50)
+  referredBy      String?          @db.VarChar(50)
+  loyaltyPoints   Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  serviceRequests ServiceRequest[]
+  bookings        Booking[]
+  reviews         Review[]
+  complaints      Complaint[]
+  referrals       Referral[]       @relation("ReferredCustomers")
+}
+
+model ProviderProfile {
+  id                  String             @id @default(uuid()) @db.VarChar(36)
+  userId              String             @unique @db.VarChar(36)
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName        String?            @db.VarChar(150)
+  bio                 String?            @db.Text
+  experienceYears     Int                @default(1)
+  verificationStatus  VerificationStatus @default(PENDING)
+  serviceRadiusKm     Float              @default(15.0)
+  latitude            Float?
+  longitude           Float?
+  averageRating       Float              @default(5.0)
+  totalReviews        Int                @default(0)
+  completedJobsCount  Int                @default(0)
+  isAvailable         Boolean            @default(true)
+  payoutAccountNumber String?            @db.VarChar(50)
+  payoutIfscCode      String?            @db.VarChar(20)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  verifications       ProviderVerification[]
+  services            ProviderService[]
+  availabilities      Availability[]
+  quotations          Quotation[]
+  bookings            Booking[]
+  reviews             Review[]
+  settlements         ProviderSettlement[]
+  snapshots           ProviderPerformanceSnapshot[]
+  rewards             ProviderReward[]
+  badges              AchievementBadge[]
+  campaigns           SocialRecognitionCampaign[]
+}
+
+model ProviderVerification {
+  id              String             @id @default(uuid()) @db.VarChar(36)
+  providerId      String             @db.VarChar(36)
+  provider        ProviderProfile    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  documentType    String             @db.VarChar(50)
+  documentNumber  String             @db.VarChar(50)
+  fileUrl         String             @db.VarChar(255)
+  status          VerificationStatus @default(PENDING)
+  rejectionReason String?            @db.Text
+  verifiedAt      DateTime?
+  verifiedBy      String?            @db.VarChar(36)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([providerId, status])
+}
+
+model ServiceCategory {
+  id              String              @id @default(uuid()) @db.VarChar(36)
+  name            String              @unique @db.VarChar(100)
+  slug            String              @unique @db.VarChar(100)
+  description     String              @db.Text
+  icon            String              @default("Wrench") @db.VarChar(50)
+  imageUrl        String?             @db.VarChar(255)
+  workflowType    ServiceWorkflowType @default(CUSTOM_QUOTATION)
+  basePrice       Int                 @default(0)
+  inspectionFee   Int                 @default(0)
+  commissionRate  Float               @default(10.0)
+  isActive        Boolean             @default(true)
+  sortOrder       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  subCategories   SubCategory[]
+  fields          CategoryFieldDefinition[]
+  providerServices ProviderService[]
+  serviceRequests  ServiceRequest[]
+  commissionRules  CommissionRule[]
+}
+
+model SubCategory {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  categoryId  String          @db.VarChar(36)
+  category    ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String          @db.VarChar(100)
+  slug        String          @db.VarChar(100)
+  description String?         @db.Text
+  imageUrl    String?         @db.VarChar(255)
+  basePrice   Int             @default(0)
+  durationMin Int             @default(60)
+  isActive    Boolean         @default(true)
+  sortOrder   Int             @default(0)
+
+  serviceRequests ServiceRequest[]
+
+  @@unique([categoryId, slug])
+  @@index([categoryId])
+}
+
+model CategoryFieldDefinition {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  categoryId  String          @db.VarChar(36)
+  category    ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String          @db.VarChar(50)
+  label       String          @db.VarChar(100)
+  type        String          @db.VarChar(20)
+  required    Boolean         @default(false)
+  options     Json?
+  placeholder String?         @db.VarChar(100)
+  helperText  String?         @db.VarChar(255)
+  sortOrder   Int             @default(0)
+
+  @@index([categoryId])
+}
+
+model ServiceArea {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  name       String   @db.VarChar(100)
+  city       String   @db.VarChar(50)
+  state      String   @db.VarChar(50)
+  postalCode String   @db.VarChar(20)
+  latitude   Float
+  longitude  Float
+  radiusKm   Float    @default(20.0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  addresses  Address[]
+  serviceRequests ServiceRequest[]
+
+  @@unique([city, postalCode])
+}
+
+model Address {
+  id            String       @id @default(uuid()) @db.VarChar(36)
+  userId        String       @db.VarChar(36)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceAreaId String?      @db.VarChar(36)
+  serviceArea   ServiceArea? @relation(fields: [serviceAreaId], references: [id])
+  title         String       @default("Home") @db.VarChar(50)
+  addressLine   String       @db.VarChar(255)
+  landmark      String?      @db.VarChar(100)
+  city          String       @db.VarChar(50)
+  state         String       @db.VarChar(50)
+  postalCode    String       @db.VarChar(20)
+  latitude      Float?
+  longitude     Float?
+  isDefault     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  serviceRequests ServiceRequest[]
+  bookings        Booking[]
+
+  @@index([userId])
+}
+
+model Availability {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  providerId  String          @db.VarChar(36)
+  provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int
+  startTime   String          @db.VarChar(10)
+  endTime     String          @db.VarChar(10)
+  isOffDay    Boolean         @default(false)
+
+  @@unique([providerId, dayOfWeek])
+}
+
+model ProviderService {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  providerId  String          @db.VarChar(36)
+  provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  categoryId  String          @db.VarChar(36)
+  category    ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  customPrice Int?
+  isActive    Boolean         @default(true)
+
+  @@unique([providerId, categoryId])
+}
+
+model ServiceRequest {
+  id                String              @id @default(uuid()) @db.VarChar(36)
+  customerId        String              @db.VarChar(36)
+  customer          CustomerProfile     @relation(fields: [customerId], references: [id])
+  categoryId        String              @db.VarChar(36)
+  category          ServiceCategory     @relation(fields: [categoryId], references: [id])
+  subCategoryId     String?             @db.VarChar(36)
+  subCategory       SubCategory?        @relation(fields: [subCategoryId], references: [id])
+  serviceAreaId     String?             @db.VarChar(36)
+  serviceArea       ServiceArea?        @relation(fields: [serviceAreaId], references: [id])
+  addressId         String              @db.VarChar(36)
+  address           Address             @relation(fields: [addressId], references: [id])
+  title             String              @db.VarChar(150)
+  description       String              @db.Text
+  customFieldValues Json?
+  budgetMin         Int?
+  budgetMax         Int?
+  preferredDate     DateTime
+  timeSlot          String              @default("Morning") @db.VarChar(50)
+  status            BookingStatus       @default(REQUESTED)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  attachments       RequestAttachment[]
+  quotations        Quotation[]
+  booking           Booking?
+
+  @@index([customerId, status])
+  @@index([categoryId, status])
+}
+
+model RequestAttachment {
+  id          String         @id @default(uuid()) @db.VarChar(36)
+  requestId   String         @db.VarChar(36)
+  request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fileUrl     String         @db.VarChar(255)
+  fileName    String         @db.VarChar(150)
+  fileType    String         @db.VarChar(50)
+  fileSize    Int
+  createdAt   DateTime       @default(now())
+
+  @@index([requestId])
+}
+
+model Quotation {
+  id             String          @id @default(uuid()) @db.VarChar(36)
+  requestId      String          @db.VarChar(36)
+  request        ServiceRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  providerId     String          @db.VarChar(36)
+  provider       ProviderProfile @relation(fields: [providerId], references: [id])
+  totalAmount    Int
+  status         QuotationStatus @default(SUBMITTED)
+  estimatedHours Int             @default(2)
+  notes          String?         @db.Text
+  validUntil     DateTime
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  lineItems      QuotationLineItem[]
+  booking        Booking?
+
+  @@unique([requestId, providerId])
+  @@index([providerId, status])
+}
+
+model QuotationLineItem {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  quotationId String    @db.VarChar(36)
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  description String    @db.VarChar(255)
+  quantity    Int       @default(1)
+  unitPrice   Int
+  total       Int
+
+  @@index([quotationId])
+}
+
+model Booking {
+  id                 String               @id @default(uuid()) @db.VarChar(36)
+  bookingNumber      String               @unique @db.VarChar(50)
+  requestId          String               @unique @db.VarChar(36)
+  request            ServiceRequest       @relation(fields: [requestId], references: [id])
+  customerId         String               @db.VarChar(36)
+  customer           CustomerProfile      @relation(fields: [customerId], references: [id])
+  providerId         String               @db.VarChar(36)
+  provider           ProviderProfile      @relation(fields: [providerId], references: [id])
+  quotationId        String?              @unique @db.VarChar(36)
+  quotation          Quotation?           @relation(fields: [quotationId], references: [id])
+  addressId          String               @db.VarChar(36)
+  address            Address              @relation(fields: [addressId], references: [id])
+  status             BookingStatus        @default(CONFIRMED)
+  scheduledDate      DateTime
+  agreedAmount       Int
+  platformFee        Int
+  providerAmount     Int
+  cancellationReason String?              @db.VarChar(255)
+  completionNotes    String?              @db.Text
+  completionProofUrl String?              @db.VarChar(255)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  statusEvents       BookingStatusEvent[]
+  priceRevisions     BookingPriceRevision[]
+  payment            Payment?
+  review             Review?
+  complaint          Complaint?
+
+  @@index([customerId, status])
+  @@index([providerId, status])
+}
+
+model BookingStatusEvent {
+  id        String        @id @default(uuid()) @db.VarChar(36)
+  bookingId String        @db.VarChar(36)
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  fromStatus BookingStatus
+  toStatus  BookingStatus
+  actorRole UserRole
+  actorId   String        @db.VarChar(36)
+  note      String?       @db.VarChar(255)
+  createdAt DateTime      @default(now())
+
+  @@index([bookingId])
+}
+
+model BookingPriceRevision {
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  bookingId     String   @db.VarChar(36)
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  addedAmount   Int
+  reason        String   @db.VarChar(255)
+  isApproved    Boolean  @default(false)
+  approvedAt    DateTime?
+  approvedBy    String?  @db.VarChar(36)
+  createdAt     DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+model Payment {
+  id               String        @id @default(uuid()) @db.VarChar(36)
+  bookingId        String        @unique @db.VarChar(36)
+  booking          Booking       @relation(fields: [bookingId], references: [id])
+  amount           Int
+  currency         String        @default("INR") @db.VarChar(10)
+  status           PaymentStatus @default(PENDING)
+  paymentGateway   String        @default("MANUAL_SANDBOX") @db.VarChar(50)
+  gatewayTxnId     String?       @unique @db.VarChar(100)
+  idempotencyKey   String?       @unique @db.VarChar(100)
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  refunds          Refund[]
+}
+
+model Refund {
+  id          String        @id @default(uuid()) @db.VarChar(36)
+  paymentId   String        @db.VarChar(36)
+  payment     Payment       @relation(fields: [paymentId], references: [id])
+  amount      Int
+  reason      String        @db.VarChar(255)
+  status      PaymentStatus @default(PENDING)
+  processedAt DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([paymentId])
+}
+
+model ProviderSettlement {
+  id             String          @id @default(uuid()) @db.VarChar(36)
+  providerId     String          @db.VarChar(36)
+  provider       ProviderProfile @relation(fields: [providerId], references: [id])
+  amount         Int
+  payoutDate     DateTime?
+  status         String          @default("PENDING") @db.VarChar(50)
+  referenceId    String?         @db.VarChar(100)
+  createdAt      DateTime        @default(now())
+
+  @@index([providerId])
+}
+
+model CommissionRule {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  categoryId  String          @db.VarChar(36)
+  category    ServiceCategory @relation(fields: [categoryId], references: [id])
+  percentage  Float           @default(10.0)
+  minFee      Int             @default(5000)
+  maxFee      Int?
+  isActive    Boolean         @default(true)
+}
+
+model Review {
+  id         String          @id @default(uuid()) @db.VarChar(36)
+  bookingId  String          @unique @db.VarChar(36)
+  booking    Booking         @relation(fields: [bookingId], references: [id])
+  customerId String          @db.VarChar(36)
+  customer   CustomerProfile @relation(fields: [customerId], references: [id])
+  providerId String          @db.VarChar(36)
+  provider   ProviderProfile @relation(fields: [providerId], references: [id])
+  rating     Int
+  comment    String          @db.Text
+  createdAt  DateTime        @default(now())
+
+  @@index([providerId])
+}
+
+model Complaint {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  bookingId   String          @unique @db.VarChar(36)
+  booking     Booking         @relation(fields: [bookingId], references: [id])
+  customerId  String          @db.VarChar(36)
+  customer    CustomerProfile @relation(fields: [customerId], references: [id])
+  status      ComplaintStatus @default(OPEN)
+  subject     String          @db.VarChar(150)
+  description String          @db.Text
+  resolution  String?         @db.Text
+  resolvedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model SupportTicket {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  userId      String          @db.VarChar(36)
+  user        User            @relation(fields: [userId], references: [id])
+  subject     String          @db.VarChar(150)
+  message     String          @db.Text
+  status      ComplaintStatus @default(OPEN)
+  assignedTo  String?         @db.VarChar(50)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  userId    String   @db.VarChar(36)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @db.VarChar(150)
+  message   String   @db.Text
+  isRead    Boolean  @default(false)
+  link      String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+model RewardProgram {
+  id           String       @id @default(uuid()) @db.VarChar(36)
+  name         String       @db.VarChar(100)
+  monthYear    String       @db.VarChar(20)
+  isActive     Boolean      @default(true)
+  rules        RewardRule[]
+  rewards      ProviderReward[]
+}
+
+model RewardRule {
+  id          String         @id @default(uuid()) @db.VarChar(36)
+  programId   String         @db.VarChar(36)
+  program     RewardProgram  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  category    RewardCategory
+  minJobs     Int            @default(5)
+  minRating   Float          @default(4.5)
+  weightJobs  Float          @default(0.30)
+  weightRating Float         @default(0.25)
+  weightPunctuality Float    @default(0.20)
+  weightQuality Float        @default(0.15)
+  weightConduct Float        @default(0.10)
+  cashPrize   Int            @default(500000)
+}
+
+model ProviderPerformanceSnapshot {
+  id                 String          @id @default(uuid()) @db.VarChar(36)
+  providerId         String          @db.VarChar(36)
+  provider           ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  monthYear          String          @db.VarChar(20)
+  completedJobs      Int             @default(0)
+  averageRating      Float           @default(5.0)
+  punctualityScore   Float           @default(100.0)
+  complaintFreeRate  Float           @default(100.0)
+  compositeScore     Float           @default(90.0)
+  createdAt          DateTime        @default(now())
+
+  @@unique([providerId, monthYear])
+}
+
+model ProviderReward {
+  id             String          @id @default(uuid()) @db.VarChar(36)
+  providerId     String          @db.VarChar(36)
+  provider       ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  programId      String          @db.VarChar(36)
+  program        RewardProgram   @relation(fields: [programId], references: [id])
+  category       RewardCategory
+  bonusAmount    Int             @default(0)
+  badgeEarned    String          @db.VarChar(100)
+  certificateUrl String?         @db.VarChar(255)
+  createdAt      DateTime        @default(now())
+
+  campaigns      SocialRecognitionCampaign[]
+}
+
+model AchievementBadge {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  providerId  String          @db.VarChar(36)
+  provider    ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  badgeName   String          @db.VarChar(100)
+  icon        String          @db.VarChar(50)
+  description String          @db.VarChar(255)
+  earnedAt    DateTime        @default(now())
+
+  @@index([providerId])
+}
+
+model SocialRecognitionCampaign {
+  id             String          @id @default(uuid()) @db.VarChar(36)
+  title          String          @db.VarChar(150)
+  providerId     String          @db.VarChar(36)
+  provider       ProviderProfile @relation(fields: [providerId], references: [id])
+  rewardId       String?         @db.VarChar(36)
+  reward         ProviderReward? @relation(fields: [rewardId], references: [id])
+  draftCopy      String          @db.Text
+  imageUrl       String?         @db.VarChar(255)
+  isApproved     Boolean         @default(false)
+  publishedAt    DateTime?
+  hasConsent     Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([providerId])
+}
+
+model ConsentRecord {
+  id          String        @id @default(uuid()) @db.VarChar(36)
+  userId      String        @db.VarChar(36)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose     String        @db.VarChar(100)
+  status      ConsentStatus @default(GRANTED)
+  grantedAt   DateTime      @default(now())
+  withdrawnAt DateTime?
+  ipAddress   String?       @db.VarChar(50)
+
+  @@index([userId, purpose])
+}
+
+model Promotion {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique @db.VarChar(50)
+  discountPct Float
+  maxDiscount Int
+  validUntil  DateTime
+  isActive    Boolean  @default(true)
+}
+
+model Referral {
+  id          String          @id @default(uuid()) @db.VarChar(36)
+  referrerId  String          @db.VarChar(36)
+  referrer    CustomerProfile @relation("ReferredCustomers", fields: [referrerId], references: [id])
+  refereeEmail String         @db.VarChar(191)
+  rewardEarned Int            @default(0)
+  isConverted Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  adminId   String   @db.VarChar(36)
+  admin     User     @relation("AdminAudit", fields: [adminId], references: [id])
+  action    String   @db.VarChar(100)
+  resource  String   @db.VarChar(100)
+  details   Json?
+  ipAddress String?  @db.VarChar(50)
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+}
